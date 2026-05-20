@@ -1,143 +1,82 @@
-import streamlit as st
-import pandas as pd
+st.subheader("Product Summary")
 
-st.set_page_config(page_title="Organic Reaction Reagent Table", layout="wide")
+col1, col2, col3, col4 = st.columns(4)
 
-st.title("Organic Chemistry Reagent Table Generator")
+with col1:
+    product_name = st.text_input(
+        "Product Name",
+        value="Desired Product"
+    )
 
-st.write(
-    "Enter reagents, molecular weights, densities, and equivalents. "
-    "The table updates live when mass, volume, equivalents, or scale are changed."
-)
+with col2:
+    product_mw = st.number_input(
+        "Product MW (g/mol)",
+        min_value=0.0,
+        value=250.0,
+        step=1.0,
+        format="%.3f"
+    )
 
-st.sidebar.header("Reaction Scale")
+with col3:
+    product_equiv = st.number_input(
+        "Product Stoichiometry",
+        min_value=0.01,
+        value=1.0,
+        step=0.1,
+        format="%.2f",
+        help="Usually 1.0 unless multiple products form per limiting reagent."
+    )
 
-limiting_mmol = st.sidebar.number_input(
-    "Limiting reagent amount (mmol)",
-    min_value=0.001,
-    value=1.000,
-    step=0.100,
-    format="%.3f"
-)
+with col4:
+    percent_yield = st.number_input(
+        "% Yield",
+        min_value=0.0,
+        max_value=100.0,
+        value=75.0,
+        step=1.0,
+        format="%.1f"
+    )
 
-st.sidebar.write("All reagent amounts are calculated relative to this scale.")
+# Theoretical calculations
+theoretical_mmol = limiting_mmol * product_equiv
 
-default_data = pd.DataFrame(
+theoretical_mass_mg = theoretical_mmol * product_mw
+
+expected_mass_mg = theoretical_mass_mg * (percent_yield / 100)
+
+theoretical_mass_g = theoretical_mass_mg / 1000
+expected_mass_g = expected_mass_mg / 1000
+
+product_df = pd.DataFrame(
     {
-        "Reagent": ["Limiting reagent", "Reagent 2", "Solvent"],
-        "MW (g/mol)": [150.0, 100.0, 0.0],
-        "Density (g/mL)": [0.0, 1.05, 0.0],
-        "Equiv.": [1.0, 1.2, 0.0],
-        "Mass (mg)": [150.0, 120.0, 0.0],
-        "Volume (mL)": [0.0, 0.114, 5.0],
-        "Role": ["Limiting reagent", "Reagent", "Solvent"],
+        "Parameter": [
+            "Product",
+            "Theoretical mmol",
+            "Theoretical Yield (mg)",
+            "Theoretical Yield (g)",
+            "Expected Yield (%)",
+            "Expected Product (mg)",
+            "Expected Product (g)",
+        ],
+        "Value": [
+            product_name,
+            f"{theoretical_mmol:.3f}",
+            f"{theoretical_mass_mg:.2f}",
+            f"{theoretical_mass_g:.4f}",
+            f"{percent_yield:.1f}",
+            f"{expected_mass_mg:.2f}",
+            f"{expected_mass_g:.4f}",
+        ],
     }
 )
 
-st.subheader("Editable Reagent Table")
-
-edited = st.data_editor(
-    default_data,
-    num_rows="dynamic",
-    use_container_width=True,
-    column_config={
-        "Reagent": st.column_config.TextColumn("Reagent"),
-        "MW (g/mol)": st.column_config.NumberColumn("MW (g/mol)", min_value=0.0, format="%.3f"),
-        "Density (g/mL)": st.column_config.NumberColumn("Density (g/mL)", min_value=0.0, format="%.3f"),
-        "Equiv.": st.column_config.NumberColumn("Equiv.", min_value=0.0, format="%.3f"),
-        "Mass (mg)": st.column_config.NumberColumn("Mass (mg)", min_value=0.0, format="%.3f"),
-        "Volume (mL)": st.column_config.NumberColumn("Volume (mL)", min_value=0.0, format="%.4f"),
-        "Role": st.column_config.SelectboxColumn(
-            "Role",
-            options=["Limiting reagent", "Reagent", "Catalyst", "Solvent", "Workup", "Other"],
-        ),
-    },
-)
-
-df = edited.copy()
-
-# Calculations
-df["mmol"] = df["Equiv."] * limiting_mmol
-
-df["Calculated Mass (mg)"] = df.apply(
-    lambda row: row["mmol"] * row["MW (g/mol)"] if row["MW (g/mol)"] > 0 else 0,
-    axis=1
-)
-
-df["Calculated Volume (mL)"] = df.apply(
-    lambda row: row["Calculated Mass (mg)"] / 1000 / row["Density (g/mL)"]
-    if row["Density (g/mL)"] > 0 and row["Calculated Mass (mg)"] > 0
-    else 0,
-    axis=1
-)
-
-df["Mass from Entered Volume (mg)"] = df.apply(
-    lambda row: row["Volume (mL)"] * row["Density (g/mL)"] * 1000
-    if row["Density (g/mL)"] > 0 and row["Volume (mL)"] > 0
-    else 0,
-    axis=1
-)
-
-df["mmol from Entered Mass"] = df.apply(
-    lambda row: row["Mass (mg)"] / row["MW (g/mol)"]
-    if row["MW (g/mol)"] > 0 and row["Mass (mg)"] > 0
-    else 0,
-    axis=1
-)
-
-df["Equiv. from Entered Mass"] = df.apply(
-    lambda row: row["mmol from Entered Mass"] / limiting_mmol
-    if limiting_mmol > 0 and row["mmol from Entered Mass"] > 0
-    else 0,
-    axis=1
-)
-
-display_cols = [
-    "Reagent",
-    "Role",
-    "MW (g/mol)",
-    "Density (g/mL)",
-    "Equiv.",
-    "mmol",
-    "Calculated Mass (mg)",
-    "Calculated Volume (mL)",
-    "Mass (mg)",
-    "Volume (mL)",
-    "Equiv. from Entered Mass",
-]
-
-st.subheader("Calculated Reaction Table")
 st.dataframe(
-    df[display_cols],
+    product_df,
     use_container_width=True,
-    hide_index=True,
+    hide_index=True
 )
 
-st.subheader("Reaction Summary")
-
-summary = df[df["Role"] != "Solvent"].copy()
-
-st.write(f"**Limiting scale:** {limiting_mmol:.3f} mmol")
-
-st.dataframe(
-    summary[
-        [
-            "Reagent",
-            "Equiv.",
-            "mmol",
-            "Calculated Mass (mg)",
-            "Calculated Volume (mL)",
-        ]
-    ],
-    use_container_width=True,
-    hide_index=True,
-)
-
-csv = df.to_csv(index=False).encode("utf-8")
-
-st.download_button(
-    label="Download reagent table as CSV",
-    data=csv,
-    file_name="organic_reaction_reagent_table.csv",
-    mime="text/csv",
+st.metric(
+    "Expected Isolated Product",
+    f"{expected_mass_mg:.2f} mg"
 )
