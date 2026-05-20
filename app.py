@@ -13,7 +13,7 @@ st.write(
 
 default_df = pd.DataFrame(
     {
-        "Type": ["Reagent", "Reagent", "Solvent", "Product"],
+        "Type": ["Limiting Reagent", "Reagent", "Solvent", "Product"],
         "Name": ["Starting material", "Reagent 2", "Solvent", "Product"],
         "MW (g/mol)": [150.0, 100.0, 0.0, 250.0],
         "Density (g/mL)": [0.0, 1.05, 0.0, 0.0],
@@ -48,47 +48,45 @@ def get_changed_cell():
 def calculate_from_reference(df, ref_row, changed_col=None):
     df = df.copy()
 
-    ref = df.loc[ref_row]
+    # Find limiting reagent row
+    limiting_rows = df.index[df["Type"] == "Limiting Reagent"].tolist()
 
-    ref_type = ref["Type"]
-    ref_mw = ref["MW (g/mol)"]
+    if limiting_rows:
+        limiting_row = limiting_rows[0]
+    else:
+        limiting_row = ref_row
+
+    # First update reference row if volume or mass changed
+    ref = df.loc[ref_row]
     ref_density = ref["Density (g/mL)"]
-    ref_equiv = ref["Equiv."]
     ref_mass = ref["Mass (mg)"]
     ref_volume = ref["Volume (mL)"]
 
-    # If user changed volume, calculate mass from volume and density
     if changed_col == "Volume (mL)" and ref_density > 0:
         ref_mass = ref_volume * ref_density * 1000
         df.loc[ref_row, "Mass (mg)"] = ref_mass
 
-    # If user changed mass, calculate volume from mass and density
     if changed_col == "Mass (mg)" and ref_density > 0:
         df.loc[ref_row, "Volume (mL)"] = ref_mass / 1000 / ref_density
 
-    # Calculate mmol of edited reference row
-    if ref_type != "Solvent" and ref_mw > 0 and ref_mass > 0:
-        ref_mmol = ref_mass / ref_mw
-        df.loc[ref_row, "mmol"] = ref_mmol
-    else:
-        ref_mmol = 0
+    # Use edited row to determine reaction scale
+    ref = df.loc[ref_row]
+    ref_mw = ref["MW (g/mol)"]
+    ref_equiv = ref["Equiv."]
+    ref_mass = ref["Mass (mg)"]
 
-    # Convert edited row into the 1.0 equivalent reaction scale
-    if ref_equiv > 0:
-        base_mmol = ref_mmol / ref_equiv
+    if ref_mw > 0 and ref_mass > 0 and ref_equiv > 0:
+        base_mmol = (ref_mass / ref_mw) / ref_equiv
     else:
         base_mmol = 0
 
-    # Recalculate every other row
+    # Recalculate table
     for i, row in df.iterrows():
         row_type = row["Type"]
         mw = row["MW (g/mol)"]
         density = row["Density (g/mL)"]
         equiv = row["Equiv."]
         percent_yield = row["% Yield"]
-
-        if i == ref_row:
-            continue
 
         if row_type == "Solvent":
             df.loc[i, "mmol"] = 0
@@ -98,12 +96,33 @@ def calculate_from_reference(df, ref_row, changed_col=None):
         mmol = base_mmol * equiv
         mass_mg = mmol * mw if mw > 0 else 0
 
-        if row_type == "Product":
-            if pd.notna(percent_yield):
-                mass_mg = mass_mg * percent_yield / 100
+        if i == ref_row:
+            if mw > 0 and df.loc[i, "Mass (mg)"] > 0:
+                df.loc[i, "mmol"] = df.loc[i, "Mass (mg)"] / mw
+            continue
 
-            df.loc[i, "mmol"] = mmol
-            df.loc[i, "Mass (mg)"] = mass_mg
+        if row_type == "Product":
+            # Product amount is calculated from limiting reagent
+            lim = df.loc[limiting_row]
+            lim_mw = lim["MW (g/mol)"]
+            lim_mass = lim["Mass (mg)"]
+            lim_equiv = lim["Equiv."]
+
+            if lim_mw > 0 and lim_mass > 0 and lim_equiv > 0:
+                limiting_base_mmol = (lim_mass / lim_mw) / lim_equiv
+            else:
+                limiting_base_mmol = base_mmol
+
+            product_mmol = limiting_base_mmol * equiv
+            theoretical_mass_mg = product_mmol * mw if mw > 0 else 0
+
+            if pd.notna(percent_yield):
+                expected_mass_mg = theoretical_mass_mg * percent_yield / 100
+            else:
+                expected_mass_mg = theoretical_mass_mg
+
+            df.loc[i, "mmol"] = product_mmol
+            df.loc[i, "Mass (mg)"] = expected_mass_mg
             df.loc[i, "Volume (mL)"] = 0
             continue
 
@@ -116,7 +135,6 @@ def calculate_from_reference(df, ref_row, changed_col=None):
             df.loc[i, "Volume (mL)"] = 0
 
     return df
-
 
 edited_df = st.data_editor(
     st.session_state.table,
