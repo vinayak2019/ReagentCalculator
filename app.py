@@ -1,40 +1,100 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-
 from PIL import Image
+import os
 
-logo = Image.open("logo.png")
+st.set_page_config(
+    page_title="Organic Reagent Table",
+    layout="wide",
+    page_icon="🧪"
+)
 
-col1, col2 = st.columns([1, 6])
+# -----------------------------
+# Styling
+# -----------------------------
+st.markdown(
+    """
+    <style>
+    .stApp {
+        background-color: #ffffff;
+    }
 
-with col1:
-    st.image(logo, width=120)
+    h1, h2, h3 {
+        color: #1f4e79;
+        font-family: Arial, sans-serif;
+    }
 
-with col2:
+    .main-title {
+        font-size: 38px;
+        font-weight: 700;
+        color: #1f4e79;
+        padding-top: 15px;
+    }
+
+    .subtitle {
+        font-size: 17px;
+        color: #444444;
+        margin-bottom: 25px;
+    }
+
+    .section-card {
+        background-color: #f7f9fc;
+        padding: 18px;
+        border-radius: 12px;
+        border-left: 6px solid #1f4e79;
+        margin-bottom: 20px;
+    }
+
+    .footer {
+        margin-top: 40px;
+        padding-top: 20px;
+        border-top: 1px solid #dddddd;
+        color: #666666;
+        font-size: 14px;
+        text-align: center;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# -----------------------------
+# Header with logo
+# -----------------------------
+col_logo, col_title = st.columns([1, 6])
+
+with col_logo:
+    if os.path.exists("logo.png"):
+        st.image("logo.png", width=120)
+    else:
+        st.markdown("🧪")
+
+with col_title:
     st.markdown(
         """
-        <div style="
-            font-size:40px;
-            font-weight:700;
-            color:#1f4e79;
-            padding-top:15px;
-        ">
-        Organic Chemistry Reagent Table
+        <div class="main-title">Organic Chemistry Reagent Table</div>
+        <div class="subtitle">
+        Bhat Research Group · Reaction Setup and Yield Calculator
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-st.set_page_config(page_title="Organic Reagent Table", layout="wide")
-
-st.title("Organic Chemistry Reagent Table")
-
-st.write(
-    "Edit the mass or volume of any reagent. "
-    "That row becomes the reference, and the rest of the table updates automatically."
+st.markdown(
+    """
+    <div class="section-card">
+    Enter reagent name, molecular weight, density, equivalents, mass, or volume.
+    Change the mass or volume of any reagent and the table updates automatically.
+    Select <b>Limiting Reagent</b> in the Type column to calculate product yield.
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
 
+# -----------------------------
+# Default table
+# -----------------------------
 default_df = pd.DataFrame(
     {
         "Type": ["Limiting Reagent", "Reagent", "Solvent", "Product"],
@@ -56,6 +116,9 @@ if "reference_row" not in st.session_state:
     st.session_state.reference_row = 0
 
 
+# -----------------------------
+# Detect edited cell
+# -----------------------------
 def get_changed_cell():
     state = st.session_state.get("editor", {})
     edited_rows = state.get("edited_rows", {})
@@ -69,10 +132,13 @@ def get_changed_cell():
     return int(last_row), last_col
 
 
-def calculate_from_reference(df, ref_row, changed_col=None):
+# -----------------------------
+# Calculation function
+# -----------------------------
+def calculate_table(df, ref_row, changed_col=None):
     df = df.copy()
 
-    # Find limiting reagent row
+    # Find limiting reagent
     limiting_rows = df.index[df["Type"] == "Limiting Reagent"].tolist()
 
     if limiting_rows:
@@ -80,8 +146,9 @@ def calculate_from_reference(df, ref_row, changed_col=None):
     else:
         limiting_row = ref_row
 
-    # First update reference row if volume or mass changed
+    # Update reference row from mass or volume
     ref = df.loc[ref_row]
+
     ref_density = ref["Density (g/mL)"]
     ref_mass = ref["Mass (mg)"]
     ref_volume = ref["Volume (mL)"]
@@ -93,18 +160,19 @@ def calculate_from_reference(df, ref_row, changed_col=None):
     if changed_col == "Mass (mg)" and ref_density > 0:
         df.loc[ref_row, "Volume (mL)"] = ref_mass / 1000 / ref_density
 
-    # Use edited row to determine reaction scale
+    # Reaction scale is determined from edited reagent
     ref = df.loc[ref_row]
+    ref_type = ref["Type"]
     ref_mw = ref["MW (g/mol)"]
     ref_equiv = ref["Equiv."]
     ref_mass = ref["Mass (mg)"]
 
-    if ref_mw > 0 and ref_mass > 0 and ref_equiv > 0:
+    if ref_type != "Solvent" and ref_mw > 0 and ref_mass > 0 and ref_equiv > 0:
         base_mmol = (ref_mass / ref_mw) / ref_equiv
     else:
         base_mmol = 0
 
-    # Recalculate table
+    # Recalculate all rows
     for i, row in df.iterrows():
         row_type = row["Type"]
         mw = row["MW (g/mol)"]
@@ -117,17 +185,9 @@ def calculate_from_reference(df, ref_row, changed_col=None):
             df.loc[i, "Mass (mg)"] = 0
             continue
 
-        mmol = base_mmol * equiv
-        mass_mg = mmol * mw if mw > 0 else 0
-
-        if i == ref_row:
-            if mw > 0 and df.loc[i, "Mass (mg)"] > 0:
-                df.loc[i, "mmol"] = df.loc[i, "Mass (mg)"] / mw
-            continue
-
         if row_type == "Product":
-            # Product amount is calculated from limiting reagent
             lim = df.loc[limiting_row]
+
             lim_mw = lim["MW (g/mol)"]
             lim_mass = lim["Mass (mg)"]
             lim_equiv = lim["Equiv."]
@@ -150,6 +210,14 @@ def calculate_from_reference(df, ref_row, changed_col=None):
             df.loc[i, "Volume (mL)"] = 0
             continue
 
+        mmol = base_mmol * equiv
+        mass_mg = mmol * mw if mw > 0 else 0
+
+        if i == ref_row:
+            if mw > 0 and df.loc[i, "Mass (mg)"] > 0:
+                df.loc[i, "mmol"] = df.loc[i, "Mass (mg)"] / mw
+            continue
+
         df.loc[i, "mmol"] = mmol
         df.loc[i, "Mass (mg)"] = mass_mg
 
@@ -160,6 +228,12 @@ def calculate_from_reference(df, ref_row, changed_col=None):
 
     return df
 
+
+# -----------------------------
+# Table
+# -----------------------------
+st.subheader("Reaction Table")
+
 edited_df = st.data_editor(
     st.session_state.table,
     key="editor",
@@ -168,16 +242,52 @@ edited_df = st.data_editor(
     column_config={
         "Type": st.column_config.SelectboxColumn(
             "Type",
-            options=["Limiting Reagent", "Reagent", "Solvent", "Product", "Catalyst", "Other"],
+            options=[
+                "Limiting Reagent",
+                "Reagent",
+                "Solvent",
+                "Product",
+                "Catalyst",
+                "Other",
+            ],
         ),
         "Name": st.column_config.TextColumn("Name"),
-        "MW (g/mol)": st.column_config.NumberColumn("MW (g/mol)", min_value=0.0, format="%.3f"),
-        "Density (g/mL)": st.column_config.NumberColumn("Density (g/mL)", min_value=0.0, format="%.3f"),
-        "Equiv.": st.column_config.NumberColumn("Equiv.", min_value=0.0, format="%.3f"),
-        "% Yield": st.column_config.NumberColumn("% Yield", min_value=0.0, max_value=100.0, format="%.1f"),
-        "Mass (mg)": st.column_config.NumberColumn("Mass (mg)", min_value=0.0, format="%.3f"),
-        "Volume (mL)": st.column_config.NumberColumn("Volume (mL)", min_value=0.0, format="%.4f"),
-        "mmol": st.column_config.NumberColumn("mmol", min_value=0.0, format="%.4f"),
+        "MW (g/mol)": st.column_config.NumberColumn(
+            "MW (g/mol)",
+            min_value=0.0,
+            format="%.3f",
+        ),
+        "Density (g/mL)": st.column_config.NumberColumn(
+            "Density (g/mL)",
+            min_value=0.0,
+            format="%.3f",
+        ),
+        "Equiv.": st.column_config.NumberColumn(
+            "Equiv.",
+            min_value=0.0,
+            format="%.3f",
+        ),
+        "% Yield": st.column_config.NumberColumn(
+            "% Yield",
+            min_value=0.0,
+            max_value=100.0,
+            format="%.1f",
+        ),
+        "Mass (mg)": st.column_config.NumberColumn(
+            "Mass (mg)",
+            min_value=0.0,
+            format="%.3f",
+        ),
+        "Volume (mL)": st.column_config.NumberColumn(
+            "Volume (mL)",
+            min_value=0.0,
+            format="%.4f",
+        ),
+        "mmol": st.column_config.NumberColumn(
+            "mmol",
+            min_value=0.0,
+            format="%.4f",
+        ),
     },
 )
 
@@ -186,7 +296,7 @@ changed_row, changed_col = get_changed_cell()
 if changed_row is not None:
     st.session_state.reference_row = changed_row
 
-calculated_df = calculate_from_reference(
+calculated_df = calculate_table(
     edited_df,
     st.session_state.reference_row,
     changed_col,
@@ -196,16 +306,32 @@ if not calculated_df.round(6).equals(st.session_state.table.round(6)):
     st.session_state.table = calculated_df
     st.rerun()
 
+# -----------------------------
+# Instructions
+# -----------------------------
 st.info(
-    "To scale the reaction, change the Mass or Volume of any non-solvent reagent. "
-    "The app uses that row's equivalents to calculate the rest of the reaction table."
+    "Change the mass or volume of any reagent to rescale the reaction. "
+    "Use Type = Limiting Reagent for the reagent that determines theoretical yield. "
+    "Use Type = Product for the product row and enter the expected % yield."
 )
 
+# -----------------------------
+# Download
+# -----------------------------
 csv = st.session_state.table.to_csv(index=False).encode("utf-8")
 
 st.download_button(
-    "Download table as CSV",
-    csv,
-    "organic_reaction_reagent_table.csv",
-    "text/csv",
+    label="Download table as CSV",
+    data=csv,
+    file_name="organic_reaction_reagent_table.csv",
+    mime="text/csv",
+)
+
+st.markdown(
+    """
+    <div class="footer">
+    Bhat Research Group · Columbia College · Organic Chemistry Resources
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
