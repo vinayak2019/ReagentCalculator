@@ -66,7 +66,7 @@ col_logo, col_title = st.columns([1, 6])
 
 with col_logo:
     if os.path.exists("logo.png"):
-        st.image("logo.png", width=120)
+        st.image("logo.png", width=150)
     else:
         st.markdown("🧪")
 
