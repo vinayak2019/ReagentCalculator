@@ -2,124 +2,128 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-st.set_page_config(page_title="Organic Reaction Reagent Table", layout="wide")
+st.set_page_config(page_title="Organic Reagent Table", layout="wide")
 
-st.title("Organic Chemistry Reagent Table Generator")
+st.title("Organic Chemistry Reagent Table")
 
 st.write(
-    "Enter the amount of one reagent you plan to use. "
-    "Mark that reagent as the scale-setting reagent. "
-    "All other reagents and the expected product mass will update automatically."
+    "Edit the mass or volume of any reagent. "
+    "That row becomes the reference, and the rest of the table updates automatically."
 )
 
-# -----------------------------
-# Default table
-# -----------------------------
 default_df = pd.DataFrame(
     {
-        "Use as Scale": [True, False, False, False],
         "Type": ["Reagent", "Reagent", "Solvent", "Product"],
         "Name": ["Starting material", "Reagent 2", "Solvent", "Product"],
         "MW (g/mol)": [150.0, 100.0, 0.0, 250.0],
         "Density (g/mL)": [0.0, 1.05, 0.0, 0.0],
         "Equiv.": [1.0, 1.2, 0.0, 1.0],
         "% Yield": [np.nan, np.nan, np.nan, 75.0],
-        "Mass (mg)": [120.0, 0.0, 0.0, 0.0],
-        "Volume (mL)": [0.0, 0.0, 5.0, 0.0],
-        "mmol": [0.0, 0.0, 0.0, 0.0],
+        "Mass (mg)": [120.0, 96.0, 0.0, 150.0],
+        "Volume (mL)": [0.0, 0.0914, 5.0, 0.0],
+        "mmol": [0.800, 0.960, 0.0, 0.600],
     }
 )
 
-if "reagent_table" not in st.session_state:
-    st.session_state.reagent_table = default_df.copy()
+if "table" not in st.session_state:
+    st.session_state.table = default_df.copy()
+
+if "reference_row" not in st.session_state:
+    st.session_state.reference_row = 0
 
 
-# -----------------------------
-# Calculation function
-# -----------------------------
-def calculate_table(df):
+def get_changed_cell():
+    state = st.session_state.get("editor", {})
+    edited_rows = state.get("edited_rows", {})
+
+    if not edited_rows:
+        return None, None
+
+    last_row = list(edited_rows.keys())[-1]
+    last_col = list(edited_rows[last_row].keys())[-1]
+
+    return int(last_row), last_col
+
+
+def calculate_from_reference(df, ref_row, changed_col=None):
     df = df.copy()
 
-    # Ensure only one row is used as scale
-    scale_rows = df.index[df["Use as Scale"] == True].tolist()
+    ref = df.loc[ref_row]
 
-    if len(scale_rows) == 0:
-        df.loc[0, "Use as Scale"] = True
-        scale_index = 0
+    ref_type = ref["Type"]
+    ref_mw = ref["MW (g/mol)"]
+    ref_density = ref["Density (g/mL)"]
+    ref_equiv = ref["Equiv."]
+    ref_mass = ref["Mass (mg)"]
+    ref_volume = ref["Volume (mL)"]
+
+    # If user changed volume, calculate mass from volume and density
+    if changed_col == "Volume (mL)" and ref_density > 0:
+        ref_mass = ref_volume * ref_density * 1000
+        df.loc[ref_row, "Mass (mg)"] = ref_mass
+
+    # If user changed mass, calculate volume from mass and density
+    if changed_col == "Mass (mg)" and ref_density > 0:
+        df.loc[ref_row, "Volume (mL)"] = ref_mass / 1000 / ref_density
+
+    # Calculate mmol of edited reference row
+    if ref_type != "Solvent" and ref_mw > 0 and ref_mass > 0:
+        ref_mmol = ref_mass / ref_mw
+        df.loc[ref_row, "mmol"] = ref_mmol
     else:
-        scale_index = scale_rows[0]
-        df["Use as Scale"] = False
-        df.loc[scale_index, "Use as Scale"] = True
+        ref_mmol = 0
 
-    scale_row = df.loc[scale_index]
-
-    scale_mw = scale_row["MW (g/mol)"]
-    scale_mass_mg = scale_row["Mass (mg)"]
-    scale_equiv = scale_row["Equiv."]
-
-    if scale_mw > 0 and scale_mass_mg > 0 and scale_equiv > 0:
-        scale_mmol = (scale_mass_mg / scale_mw) / scale_equiv
+    # Convert edited row into the 1.0 equivalent reaction scale
+    if ref_equiv > 0:
+        base_mmol = ref_mmol / ref_equiv
     else:
-        scale_mmol = 0
+        base_mmol = 0
 
+    # Recalculate every other row
     for i, row in df.iterrows():
+        row_type = row["Type"]
         mw = row["MW (g/mol)"]
         density = row["Density (g/mL)"]
         equiv = row["Equiv."]
-        row_type = row["Type"]
         percent_yield = row["% Yield"]
 
-        # Solvents are not calculated by equivalents
-        if row_type == "Solvent":
-            df.loc[i, "mmol"] = 0
+        if i == ref_row:
             continue
 
-        # Product calculation
+        if row_type == "Solvent":
+            df.loc[i, "mmol"] = 0
+            df.loc[i, "Mass (mg)"] = 0
+            continue
+
+        mmol = base_mmol * equiv
+        mass_mg = mmol * mw if mw > 0 else 0
+
         if row_type == "Product":
-            product_mmol = scale_mmol * equiv
-            theoretical_mass_mg = product_mmol * mw
-
             if pd.notna(percent_yield):
-                expected_mass_mg = theoretical_mass_mg * percent_yield / 100
-            else:
-                expected_mass_mg = theoretical_mass_mg
+                mass_mg = mass_mg * percent_yield / 100
 
-            df.loc[i, "mmol"] = product_mmol
-            df.loc[i, "Mass (mg)"] = expected_mass_mg
+            df.loc[i, "mmol"] = mmol
+            df.loc[i, "Mass (mg)"] = mass_mg
             df.loc[i, "Volume (mL)"] = 0
             continue
 
-        # Reagent calculation
-        reagent_mmol = scale_mmol * equiv
-        reagent_mass_mg = reagent_mmol * mw if mw > 0 else 0
-
-        df.loc[i, "mmol"] = reagent_mmol
-
-        # Do not overwrite the manually entered scale reagent mass
-        if i != scale_index:
-            df.loc[i, "Mass (mg)"] = reagent_mass_mg
+        df.loc[i, "mmol"] = mmol
+        df.loc[i, "Mass (mg)"] = mass_mg
 
         if density > 0:
-            df.loc[i, "Volume (mL)"] = reagent_mass_mg / 1000 / density
+            df.loc[i, "Volume (mL)"] = mass_mg / 1000 / density
         else:
             df.loc[i, "Volume (mL)"] = 0
 
     return df
 
 
-# -----------------------------
-# Editable table
-# -----------------------------
 edited_df = st.data_editor(
-    st.session_state.reagent_table,
+    st.session_state.table,
+    key="editor",
     num_rows="dynamic",
     use_container_width=True,
-    key="editor",
     column_config={
-        "Use as Scale": st.column_config.CheckboxColumn(
-            "Use as Scale",
-            help="Check the reagent whose entered mass determines the reaction scale.",
-        ),
         "Type": st.column_config.SelectboxColumn(
             "Type",
             options=["Reagent", "Solvent", "Product", "Catalyst", "Other"],
@@ -133,31 +137,33 @@ edited_df = st.data_editor(
         "Volume (mL)": st.column_config.NumberColumn("Volume (mL)", min_value=0.0, format="%.4f"),
         "mmol": st.column_config.NumberColumn("mmol", min_value=0.0, format="%.4f"),
     },
-    disabled=["mmol"],
 )
 
-calculated_df = calculate_table(edited_df)
+changed_row, changed_col = get_changed_cell()
 
-if not calculated_df.round(6).equals(st.session_state.reagent_table.round(6)):
-    st.session_state.reagent_table = calculated_df
+if changed_row is not None:
+    st.session_state.reference_row = changed_row
+
+calculated_df = calculate_from_reference(
+    edited_df,
+    st.session_state.reference_row,
+    changed_col,
+)
+
+if not calculated_df.round(6).equals(st.session_state.table.round(6)):
+    st.session_state.table = calculated_df
     st.rerun()
 
-
-# -----------------------------
-# Notes
-# -----------------------------
 st.info(
-    "Use the checkbox to choose the reagent that sets the reaction scale. "
-    "Enter the mass you want to use for that reagent. "
-    "The app calculates all other reagent masses and volumes from equivalents. "
-    "For the product row, enter the product MW, product stoichiometry, and expected % yield."
+    "To scale the reaction, change the Mass or Volume of any non-solvent reagent. "
+    "The app uses that row's equivalents to calculate the rest of the reaction table."
 )
 
-csv = st.session_state.reagent_table.to_csv(index=False).encode("utf-8")
+csv = st.session_state.table.to_csv(index=False).encode("utf-8")
 
 st.download_button(
-    label="Download table as CSV",
-    data=csv,
-    file_name="organic_reaction_reagent_table.csv",
-    mime="text/csv",
+    "Download table as CSV",
+    csv,
+    "organic_reaction_reagent_table.csv",
+    "text/csv",
 )
