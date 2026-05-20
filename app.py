@@ -126,7 +126,6 @@ if "reference_row" not in st.session_state:
 # Helper functions
 # -----------------------------
 def smiles_to_mw(smiles):
-    """Convert SMILES to average molecular weight."""
     if not smiles or not isinstance(smiles, str):
         return None
 
@@ -154,6 +153,15 @@ def get_changed_cell():
 def calculate_table(df, ref_row, changed_col=None):
     df = df.copy()
 
+    # Keep index clean
+    df = df.reset_index(drop=True)
+
+    if len(df) == 0:
+        return df
+
+    if ref_row >= len(df):
+        ref_row = 0
+
     # Find limiting reagent
     limiting_rows = df.index[df["Type"] == "Limiting Reagent"].tolist()
 
@@ -176,19 +184,30 @@ def calculate_table(df, ref_row, changed_col=None):
     if changed_col == "Mass (mg)" and ref_density > 0:
         df.loc[ref_row, "Volume (mL)"] = ref_mass / 1000 / ref_density
 
-    # Reaction scale is determined from edited reagent
+    # Reaction scale from edited row
     ref = df.loc[ref_row]
     ref_type = ref["Type"]
     ref_mw = ref["MW (g/mol)"]
     ref_equiv = ref["Equiv."]
     ref_mass = ref["Mass (mg)"]
 
-    if ref_type != "Solvent" and ref_mw > 0 and ref_mass > 0 and ref_equiv > 0:
+    if ref_type not in ["Solvent", "Product"] and ref_mw > 0 and ref_mass > 0 and ref_equiv > 0:
         base_mmol = (ref_mass / ref_mw) / ref_equiv
     else:
         base_mmol = 0
 
-    # Recalculate all rows
+    # If edited row is not usable, fall back to limiting reagent
+    lim = df.loc[limiting_row]
+    lim_mw = lim["MW (g/mol)"]
+    lim_mass = lim["Mass (mg)"]
+    lim_equiv = lim["Equiv."]
+
+    if lim_mw > 0 and lim_mass > 0 and lim_equiv > 0:
+        limiting_base_mmol = (lim_mass / lim_mw) / lim_equiv
+    else:
+        limiting_base_mmol = base_mmol
+
+    # Recalculate rows
     for i, row in df.iterrows():
         row_type = row["Type"]
         mw = row["MW (g/mol)"]
@@ -202,17 +221,6 @@ def calculate_table(df, ref_row, changed_col=None):
             continue
 
         if row_type == "Product":
-            lim = df.loc[limiting_row]
-
-            lim_mw = lim["MW (g/mol)"]
-            lim_mass = lim["Mass (mg)"]
-            lim_equiv = lim["Equiv."]
-
-            if lim_mw > 0 and lim_mass > 0 and lim_equiv > 0:
-                limiting_base_mmol = (lim_mass / lim_mw) / lim_equiv
-            else:
-                limiting_base_mmol = base_mmol
-
             product_mmol = limiting_base_mmol * equiv
             theoretical_mass_mg = product_mmol * mw if mw > 0 else 0
 
@@ -283,16 +291,27 @@ with st.container(border=True):
                 selected_row_label = st.selectbox(
                     "Apply MW to table row",
                     options=list(row_options.keys()),
+                    key="selected_mw_row",
                 )
 
                 if st.button("Apply MW to Selected Row"):
                     selected_row = row_options[selected_row_label]
 
-                    st.session_state.table.loc[selected_row, "MW (g/mol)"] = round(mw, 3)
-                    st.session_state.table.loc[selected_row, "SMILES"] = smiles
+                    updated_table = st.session_state.table.copy()
+
+                    updated_table.loc[selected_row, "MW (g/mol)"] = round(mw, 3)
+                    updated_table.loc[selected_row, "SMILES"] = smiles
+
+                    updated_table = calculate_table(
+                        updated_table,
+                        st.session_state.reference_row,
+                        changed_col="MW (g/mol)",
+                    )
+
+                    st.session_state.table = updated_table
 
                     st.success(
-                        f"Applied MW = {mw:.3f} g/mol to {st.session_state.table.loc[selected_row, 'Name']}."
+                        f"Applied MW = {mw:.3f} g/mol to {updated_table.loc[selected_row, 'Name']}."
                     )
 
                     st.rerun()
@@ -312,6 +331,7 @@ edited_df = st.data_editor(
     key="editor",
     num_rows="dynamic",
     use_container_width=True,
+    disabled=["mmol"],
     column_config={
         "Type": st.column_config.SelectboxColumn(
             "Type",
@@ -383,7 +403,8 @@ if not calculated_df.round(6).equals(st.session_state.table.round(6)):
 st.info(
     "Change the mass or volume of any reagent to rescale the reaction. "
     "Use Type = Limiting Reagent for the reagent that determines theoretical yield. "
-    "Use Type = Product for the product row and enter the expected % yield."
+    "Use Type = Product for the product row and enter the expected % yield. "
+    "Use the structure drawer to calculate MW and apply it to any table row."
 )
 
 # -----------------------------
