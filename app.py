@@ -89,7 +89,7 @@ with col_title:
         """
         <div class="main-title">Organic Chemistry Reagent Table</div>
         <div class="subtitle">
-        Bhat Research Group · Reaction Setup and Yield Calculator
+        Reaction Setup and Yield Calculator
         </div>
         """,
         unsafe_allow_html=True,
