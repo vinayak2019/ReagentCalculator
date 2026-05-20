@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from PIL import Image
 import os
+import base64
 
 from streamlit_ketcher import st_ketcher
 from rdkit import Chem
@@ -70,7 +71,16 @@ col_logo, col_title = st.columns([1, 6])
 
 with col_logo:
     if os.path.exists("logo.png"):
-        st.image("logo.png", width=250)
+        st.markdown(
+            """
+            <a href="https://www.bhatresearchgroup.com" target="_blank">
+                <img src="data:image/png;base64,{}" width="250">
+            </a>
+            """.format(
+                base64.b64encode(open("logo.png", "rb").read()).decode()
+            ),
+            unsafe_allow_html=True,
+        )
     else:
         st.markdown("🧪")
 
@@ -422,7 +432,15 @@ st.download_button(
 st.markdown(
     """
     <div class="footer">
-    Bhat Research Group · Columbia College · Organic Chemistry Resources
+        <a href="https://www.bhatresearchgroup.com" target="_blank"
+        style="
+            text-decoration:none;
+            color:#1f4e79;
+            font-weight:600;
+        ">
+        Bhat Research Group
+        </a>
+        · Columbia College · Organic Chemistry Resources
     </div>
     """,
     unsafe_allow_html=True,
