@@ -144,7 +144,7 @@ edited_df = st.data_editor(
     column_config={
         "Type": st.column_config.SelectboxColumn(
             "Type",
-            options=["Reagent", "Solvent", "Product", "Catalyst", "Other"],
+            options=["Limiting Reagent", "Reagent", "Solvent", "Product", "Catalyst", "Other"],
         ),
         "Name": st.column_config.TextColumn("Name"),
         "MW (g/mol)": st.column_config.NumberColumn("MW (g/mol)", min_value=0.0, format="%.3f"),
