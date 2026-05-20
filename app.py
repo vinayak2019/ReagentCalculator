@@ -2,6 +2,30 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
+from PIL import Image
+
+logo = Image.open("logo.png")
+
+col1, col2 = st.columns([1, 6])
+
+with col1:
+    st.image(logo, width=120)
+
+with col2:
+    st.markdown(
+        """
+        <div style="
+            font-size:40px;
+            font-weight:700;
+            color:#1f4e79;
+            padding-top:15px;
+        ">
+        Organic Chemistry Reagent Table
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 st.set_page_config(page_title="Organic Reagent Table", layout="wide")
 
 st.title("Organic Chemistry Reagent Table")
