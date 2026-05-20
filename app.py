@@ -4,6 +4,10 @@ import numpy as np
 from PIL import Image
 import os
 
+from streamlit_ketcher import st_ketcher
+from rdkit import Chem
+from rdkit.Chem import Descriptors
+
 st.set_page_config(
     page_title="Organic Reagent Table",
     layout="wide",
@@ -66,7 +70,7 @@ col_logo, col_title = st.columns([1, 6])
 
 with col_logo:
     if os.path.exists("logo.png"):
-        st.image("logo.png", width=250)
+        st.image("logo.png", width=120)
     else:
         st.markdown("🧪")
 
@@ -87,6 +91,7 @@ st.markdown(
     Enter reagent name, molecular weight, density, equivalents, mass, or volume.
     Change the mass or volume of any reagent and the table updates automatically.
     Select <b>Limiting Reagent</b> in the Type column to calculate product yield.
+    You can also draw a molecular structure to calculate molecular weight.
     </div>
     """,
     unsafe_allow_html=True,
@@ -106,6 +111,7 @@ default_df = pd.DataFrame(
         "Mass (mg)": [120.0, 96.0, 0.0, 150.0],
         "Volume (mL)": [0.0, 0.0914, 5.0, 0.0],
         "mmol": [0.800, 0.960, 0.0, 0.600],
+        "SMILES": ["", "", "", ""],
     }
 )
 
@@ -117,8 +123,21 @@ if "reference_row" not in st.session_state:
 
 
 # -----------------------------
-# Detect edited cell
+# Helper functions
 # -----------------------------
+def smiles_to_mw(smiles):
+    """Convert SMILES to average molecular weight."""
+    if not smiles or not isinstance(smiles, str):
+        return None
+
+    mol = Chem.MolFromSmiles(smiles)
+
+    if mol is None:
+        return None
+
+    return Descriptors.MolWt(mol)
+
+
 def get_changed_cell():
     state = st.session_state.get("editor", {})
     edited_rows = state.get("edited_rows", {})
@@ -132,9 +151,6 @@ def get_changed_cell():
     return int(last_row), last_col
 
 
-# -----------------------------
-# Calculation function
-# -----------------------------
 def calculate_table(df, ref_row, changed_col=None):
     df = df.copy()
 
@@ -230,7 +246,64 @@ def calculate_table(df, ref_row, changed_col=None):
 
 
 # -----------------------------
-# Table
+# Molecular structure drawer
+# -----------------------------
+st.subheader("Molecular Structure Drawer")
+
+with st.container(border=True):
+    st.write(
+        "Draw a molecule, calculate its molecular weight, and apply it to one row in the reagent table."
+    )
+
+    drawer_col, apply_col = st.columns([2, 1])
+
+    with drawer_col:
+        smiles = st_ketcher(
+            value="",
+            height=450,
+            key="ketcher_drawer",
+        )
+
+    with apply_col:
+        st.markdown("### Calculated Molecule")
+
+        if smiles:
+            mw = smiles_to_mw(smiles)
+
+            if mw is not None:
+                st.success("Structure recognized.")
+                st.write(f"**SMILES:** `{smiles}`")
+                st.metric("Molecular Weight", f"{mw:.3f} g/mol")
+
+                row_options = {
+                    f"{i}: {row['Name']} ({row['Type']})": i
+                    for i, row in st.session_state.table.iterrows()
+                }
+
+                selected_row_label = st.selectbox(
+                    "Apply MW to table row",
+                    options=list(row_options.keys()),
+                )
+
+                if st.button("Apply MW to Selected Row"):
+                    selected_row = row_options[selected_row_label]
+
+                    st.session_state.table.loc[selected_row, "MW (g/mol)"] = round(mw, 3)
+                    st.session_state.table.loc[selected_row, "SMILES"] = smiles
+
+                    st.success(
+                        f"Applied MW = {mw:.3f} g/mol to {st.session_state.table.loc[selected_row, 'Name']}."
+                    )
+
+                    st.rerun()
+            else:
+                st.error("Could not calculate molecular weight. Check the structure.")
+        else:
+            st.info("Draw a structure above and click Apply in the structure editor.")
+
+
+# -----------------------------
+# Reaction table
 # -----------------------------
 st.subheader("Reaction Table")
 
@@ -288,6 +361,7 @@ edited_df = st.data_editor(
             min_value=0.0,
             format="%.4f",
         ),
+        "SMILES": st.column_config.TextColumn("SMILES"),
     },
 )
 
@@ -306,9 +380,6 @@ if not calculated_df.round(6).equals(st.session_state.table.round(6)):
     st.session_state.table = calculated_df
     st.rerun()
 
-# -----------------------------
-# Instructions
-# -----------------------------
 st.info(
     "Change the mass or volume of any reagent to rescale the reaction. "
     "Use Type = Limiting Reagent for the reagent that determines theoretical yield. "
